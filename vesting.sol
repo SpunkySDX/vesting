@@ -73,6 +73,63 @@ interface IERC20 {
     function transferFrom(address from, address to, uint256 amount) external returns (bool);
 }
 
+abstract contract ReentrancyGuard {
+    // Booleans are more expensive than uint256 or any type that takes up a full
+    // word because each write operation emits an extra SLOAD to first read the
+    // slot's contents, replace the bits taken up by the boolean, and then write
+    // back. This is the compiler's defense against contract upgrades and
+    // pointer aliasing, and it cannot be disabled.
+
+    // The values being non-zero value makes deployment a bit more expensive,
+    // but in exchange the refund on every call to nonReentrant will be lower in
+    // amount. Since refunds are capped to a percentage of the total
+    // transaction's gas, it is best to keep them low in cases like this one, to
+    // increase the likelihood of the full refund coming into effect.
+    uint256 private constant _NOT_ENTERED = 1;
+    uint256 private constant _ENTERED = 2;
+
+    uint256 private _status;
+
+    constructor() {
+        _status = _NOT_ENTERED;
+    }
+
+    /**
+     * @dev Prevents a contract from calling itself, directly or indirectly.
+     * Calling a `nonReentrant` function from another `nonReentrant`
+     * function is not supported. It is possible to prevent this from happening
+     * by making the `nonReentrant` function external, and making it call a
+     * `private` function that does the actual work.
+     */
+    modifier nonReentrant() {
+        _nonReentrantBefore();
+        _;
+        _nonReentrantAfter();
+    }
+
+    function _nonReentrantBefore() private {
+        // On the first call to nonReentrant, _status will be _NOT_ENTERED
+        require(_status != _ENTERED, "ReentrancyGuard: reentrant call");
+
+        // Any calls to nonReentrant after this point will fail
+        _status = _ENTERED;
+    }
+
+    function _nonReentrantAfter() private {
+        // By storing the original value once again, a refund is triggered (see
+        // https://eips.ethereum.org/EIPS/eip-2200)
+        _status = _NOT_ENTERED;
+    }
+
+    /**
+     * @dev Returns true if the reentrancy guard is currently set to "entered", which indicates there is a
+     * `nonReentrant` function in the call stack.
+     */
+    function _reentrancyGuardEntered() internal view returns (bool) {
+        return _status == _ENTERED;
+    }
+}
+
 abstract contract Context {
     function _msgSender() internal view virtual returns (address) {
         return msg.sender;
@@ -160,23 +217,29 @@ abstract contract Ownable is Context {
     }
 }
 
-contract SpunkySDXTokenVesting is Ownable{
+contract SpunkySDXTokenVesting is Ownable,ReentrancyGuard{
     string public name;
 
-    struct VestingSchedule {
-        uint256 start;
-        uint256 cliff;
-        uint256 duration;
+    struct VestingDetail {
+        address vestOwner;
         uint256 amount;
-        uint256 claimed;
+        uint256 startTime;
+        uint256 cliffDuration;
+        uint256 vestingDuration;
+        uint256 releasedAmount;
     }
 
+    address[] public vestingAccounts;
+
     IERC20 public spunkyToken;
-    mapping(address => VestingSchedule) public vestingSchedules;
+    mapping(address => VestingDetail[]) private _vestingDetails;
 
     event VestingAdded(address indexed account, uint256 amount, uint256 start, uint256 cliff, uint256 duration);
     event TokensClaimed(address indexed account, uint256 amount);
     event VestingRevoked(address indexed account);
+    event TokensReleased(address indexed account, uint256 amount);
+    event VestingScheduleAdded(address indexed account, uint256 amount, uint256 start, uint256 cliff, uint256 duration);
+
 
     constructor(address _spunkyToken) {
         name = "SpunkySDXTokenVesting";
@@ -184,52 +247,134 @@ contract SpunkySDXTokenVesting is Ownable{
         spunkyToken = IERC20(_spunkyToken);
     }
 
-    function addVestingSchedule(address account, uint256 amount, uint256 cliffDuration, uint256 vestingDuration) external onlyOwner{
-        require(account != address(0), "Account address cannot be zero address");
-        require(vestingSchedules[account].amount == 0, "Vesting schedule already exists for account");
+     function addVestByOwner(
+        address account,
+        uint256 amount,
+        uint256 cliffDuration,
+        uint256 vestingDuration
+    ) public onlyOwner {
+        spunkyToken.transfer(address(this), amount);
+        addVestingSchedule(account, amount, cliffDuration, vestingDuration);
+    }
 
-        vestingSchedules[account] = VestingSchedule({
-            start: block.timestamp,
-            cliff: block.timestamp + cliffDuration,
-            duration: block.timestamp + vestingDuration,
+     function addVestingSchedule(
+        address account,
+        uint256 amount,
+        uint256 cliffDuration,
+        uint256 vestingDuration
+    ) internal {
+        // i removed the nonReentrant onthis function since it internal
+        require(account != address(0), "Invalid account");
+        require(amount > 0, "Invalid amount");
+        require(
+            cliffDuration < vestingDuration,
+            "Cliff duration must be less than vesting duration"
+        );
+        require(
+            spunkyToken.balanceOf(msg.sender) >= amount,
+            "Owner does not have enough balance"
+        );
+        VestingDetail memory newVesting = VestingDetail({
+            vestOwner: msg.sender,
             amount: amount,
-            claimed: 0
+            startTime: block.timestamp,
+            cliffDuration: cliffDuration,
+            vestingDuration: vestingDuration,
+            releasedAmount: 0
         });
-
-        require(spunkyToken.transferFrom(msg.sender, address(this), amount), "Token transfer failed");
-
-        emit VestingAdded(account, amount, block.timestamp, block.timestamp + cliffDuration, block.timestamp + vestingDuration);
+        _vestingDetails[account].push(newVesting);
+        emit VestingScheduleAdded(
+            account,
+            amount,
+            block.timestamp,
+            cliffDuration,
+            vestingDuration
+        );
     }
 
-    function claim() external {
-        VestingSchedule storage schedule = vestingSchedules[msg.sender];
-        require(block.timestamp > schedule.cliff, "Cliff period has not ended");
-
-        uint256 elapsedTime = block.timestamp - schedule.start;
-        uint256 totalDuration = schedule.duration - schedule.start;
-
-        uint256 vestedAmount = (schedule.amount * elapsedTime) / totalDuration;
-        uint256 claimableAmount = vestedAmount - schedule.claimed;
-
-        require(claimableAmount > 0, "No tokens to claim");
-
-        schedule.claimed += claimableAmount;
-
-        require(spunkyToken.transfer(msg.sender, claimableAmount), "Token transfer failed");
-
-        emit TokensClaimed(msg.sender, claimableAmount);
+     // Function to release vested tokens
+    function releaseVestedTokens(address account) public nonReentrant {
+        require(account != address(0), "Invalid account");
+        VestingDetail[] storage vestingDetails = _vestingDetails[account];
+        for (uint256 i = 0; i < vestingDetails.length; i++) {
+            VestingDetail storage vesting = vestingDetails[i];
+            if (
+                vesting.amount > 0 &&
+                vesting.amount > vesting.releasedAmount &&
+                block.timestamp >= vesting.startTime + vesting.cliffDuration
+            ) {
+                release(account, vesting);
+            }
+        }
     }
 
-    function revokeVesting(address account) external onlyOwner{
-        VestingSchedule storage schedule = vestingSchedules[account];
-        require(schedule.amount > 0, "No vesting schedule to revoke");
+    // Internal function to release vested tokens for a specific vesting detail
+    function release(address account, VestingDetail storage vesting) internal {
+        require(
+            block.timestamp >= vesting.startTime + vesting.cliffDuration,
+            "Cliff period has not ended"
+        );
 
-        uint256 refundAmount = schedule.amount - schedule.claimed;
+        require(
+            vesting.releasedAmount < vesting.amount,
+            "No tokens to release"
+        );
 
-        delete vestingSchedules[account];
+        uint256 elapsedTime = block.timestamp -
+            (vesting.startTime + vesting.cliffDuration);
 
-        require(spunkyToken.transfer(msg.sender, refundAmount), "Token transfer failed");
+        // If elapsed time is greater than vesting duration, set it equal to vesting duration
+        elapsedTime = (elapsedTime > vesting.vestingDuration)
+            ? vesting.vestingDuration
+            : elapsedTime;
 
-        emit VestingRevoked(account);
+        // Calculate the total vested amount till now
+        uint256 totalVestedAmount = (vesting.amount * elapsedTime) /
+            vesting.vestingDuration;
+
+        // Calculate the amount that is yet to be released
+        uint256 unreleasedAmount = totalVestedAmount - vesting.releasedAmount;
+
+        require(unreleasedAmount > 0, "No tokens to release");
+
+        // Update the released amount
+        vesting.releasedAmount += unreleasedAmount;
+
+        // Transfer the tokens
+        spunkyToken.transfer(account, unreleasedAmount);
+        emit TokensReleased(account, unreleasedAmount);
     }
+
+    function getNumberOfVestingSchedules(
+        address account
+    ) public view returns (uint256) {
+        return _vestingDetails[account].length;
+    }
+
+    function getVestingDetails(
+        address account
+    ) public view returns (VestingDetail[] memory) {
+        return _vestingDetails[account];
+    }
+
+    function withdraw() external onlyOwner {
+
+       uint256 amount = address(this).balance;
+       payable(owner()).transfer(amount);
+
+    }
+
+       function withdrawToken(
+        address tokenAddress,
+        uint256 tokenAmount
+    ) external onlyOwner {
+        IERC20 token = IERC20(tokenAddress);
+    
+        require(
+            tokenAddress != address(spunkyToken),
+            "Owner cannot withdraw SSDX tokens in contract"
+        );
+        token.transfer(owner(), tokenAmount);
+    }
+
 }
