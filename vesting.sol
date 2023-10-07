@@ -247,13 +247,14 @@ contract SpunkySDXTokenVesting is Ownable,ReentrancyGuard{
         spunkyToken = IERC20(_spunkyToken);
     }
 
-     function addVestByOwner(
-        address account,
-        uint256 amount,
-        uint256 cliffDuration,
-        uint256 vestingDuration
+    function addVestByOwner(
+     address account,
+     uint256 amount,
+    uint256 cliffDuration,
+     uint256 vestingDuration
     ) public onlyOwner {
-        spunkyToken.transfer(address(this), amount);
+        require(spunkyToken.balanceOf(msg.sender) >= amount, "Owner does not have enough balance");
+        spunkyToken.transferFrom(msg.sender, address(this), amount);
         addVestingSchedule(account, amount, cliffDuration, vestingDuration);
     }
 
