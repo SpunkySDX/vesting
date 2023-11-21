@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: MIT
+import "@openzeppelin/contracts/utils/Address.sol";
 
 pragma solidity >=0.8.0 <0.9.0;
 
@@ -229,8 +230,6 @@ contract SpunkySDXTokenVesting is Ownable,ReentrancyGuard{
         uint256 releasedAmount;
     }
 
-    address[] public vestingAccounts;
-
     IERC20 public spunkyToken;
     mapping(address => VestingDetail[]) private _vestingDetails;
 
@@ -239,11 +238,11 @@ contract SpunkySDXTokenVesting is Ownable,ReentrancyGuard{
     event VestingRevoked(address indexed account);
     event TokensReleased(address indexed account, uint256 amount);
     event VestingScheduleAdded(address indexed account, uint256 amount, uint256 start, uint256 cliff, uint256 duration);
-
+    event Withdraw(uint256 amount);
 
     constructor(address _spunkyToken) {
         name = "SpunkySDXTokenVesting";
-        require(_spunkyToken != address(0), "Token address cannot be zero address");
+        require(_spunkyToken != address(0), "Token address cannot be zero address"); 
         spunkyToken = IERC20(_spunkyToken);
     }
 
@@ -252,9 +251,9 @@ contract SpunkySDXTokenVesting is Ownable,ReentrancyGuard{
      uint256 amount,
     uint256 cliffDuration,
      uint256 vestingDuration
-    ) public onlyOwner {
+    ) public onlyOwner nonReentrant{
         require(spunkyToken.balanceOf(msg.sender) >= amount, "Owner does not have enough balance");
-        spunkyToken.transferFrom(msg.sender, address(this), amount);
+    spunkyToken.safeTransferFrom(msg.sender, address(this), amount);
         addVestingSchedule(account, amount, cliffDuration, vestingDuration);
     }
 
@@ -263,7 +262,9 @@ contract SpunkySDXTokenVesting is Ownable,ReentrancyGuard{
         uint256 amount,
         uint256 cliffDuration,
         uint256 vestingDuration
-    ) internal {
+    ) public {
+         require(spunkyToken.balanceOf(msg.sender) >= amount, "Owner does not have enough balance");
+    spunkyToken.safeTransferFrom(msg.sender, address(this), amount);
         // i removed the nonReentrant onthis function since it internal
         require(account != address(0), "Invalid account");
         require(amount > 0, "Invalid amount");
@@ -310,41 +311,37 @@ contract SpunkySDXTokenVesting is Ownable,ReentrancyGuard{
     }
 
     // Internal function to release vested tokens for a specific vesting detail
-    function release(address account, VestingDetail storage vesting) internal {
+     function release(address account, VestingDetail storage vesting) internal {
+      uint256 unreleased = releasableAmount(vesting);
+
+      if (unreleased > 0) {
+        vesting.releasedAmount += unreleased;
         require(
-            block.timestamp >= vesting.startTime + vesting.cliffDuration,
-            "Cliff period has not ended"
+            IERC20(spunkyToken).SafeTransfer(account, unreleased),
+            "Token transfer failed"
         );
 
-        require(
-            vesting.releasedAmount < vesting.amount,
-            "No tokens to release"
-        );
-
-        uint256 elapsedTime = block.timestamp -
-            (vesting.startTime + vesting.cliffDuration);
-
-        // If elapsed time is greater than vesting duration, set it equal to vesting duration
-        elapsedTime = (elapsedTime > vesting.vestingDuration)
-            ? vesting.vestingDuration
-            : elapsedTime;
-
-        // Calculate the total vested amount till now
-        uint256 totalVestedAmount = (vesting.amount * elapsedTime) /
-            vesting.vestingDuration;
-
-        // Calculate the amount that is yet to be released
-        uint256 unreleasedAmount = totalVestedAmount - vesting.releasedAmount;
-
-        require(unreleasedAmount > 0, "No tokens to release");
-
-        // Update the released amount
-        vesting.releasedAmount += unreleasedAmount;
-
-        // Transfer the tokens
-        spunkyToken.transfer(account, unreleasedAmount);
-        emit TokensReleased(account, unreleasedAmount);
+        emit TokensReleased(account, unreleased);
+      }
     }
+
+    function releasableAmount(VestingDetail storage vesting) private view returns (uint256) {
+    // If the current time is before the cliff, no tokens can be released
+    if (block.timestamp < vesting.startTime + vesting.cliffDuration) {
+        return 0;
+    }
+
+    // If the current time is after the end of the vesting period, all tokens can be released
+    if (block.timestamp >= vesting.startTime + vesting.vestingDuration) {
+        return vesting.amount;
+    }
+
+    // If the current time is during the vesting period, calculate the proportion of tokens that can be released
+    uint256 vestingTimeElapsed = block.timestamp - vesting.startTime;
+    uint256 proportion = vestingTimeElapsed / vesting.vestingDuration;
+
+    return vesting.amount * proportion;
+   }
 
     function getNumberOfVestingSchedules(
         address account
@@ -361,9 +358,9 @@ contract SpunkySDXTokenVesting is Ownable,ReentrancyGuard{
     function withdraw() external onlyOwner {
 
        uint256 amount = address(this).balance;
-       payable(owner()).transfer(amount);
-
-    }
+       Address.sendValue(payable(msg.sender), msg.value);
+       emit Withdraw(amount);
+  }
 
        function withdrawToken(
         address tokenAddress,
@@ -375,7 +372,8 @@ contract SpunkySDXTokenVesting is Ownable,ReentrancyGuard{
             tokenAddress != address(spunkyToken),
             "Owner cannot withdraw SSDX tokens in contract"
         );
-        token.transfer(owner(), tokenAmount);
+        token.SafeTransfer(owner(), tokenAmount);
+        emit Withdraw(tokenAmount);
     }
 
 }
