@@ -253,7 +253,6 @@ contract SpunkySDXTokenVesting is Ownable,ReentrancyGuard{
      uint256 vestingDuration
     ) public onlyOwner nonReentrant{
         require(spunkyToken.balanceOf(msg.sender) >= amount, "Owner does not have enough balance");
-    spunkyToken.safeTransferFrom(msg.sender, address(this), amount);
         addVestingSchedule(account, amount, cliffDuration, vestingDuration);
     }
 
@@ -325,7 +324,7 @@ contract SpunkySDXTokenVesting is Ownable,ReentrancyGuard{
       }
     }
 
-    function releasableAmount(VestingDetail storage vesting) private view returns (uint256) {
+   function releasableAmount(VestingDetail storage vesting) private view returns (uint256) {
     // If the current time is before the cliff, no tokens can be released
     if (block.timestamp < vesting.startTime + vesting.cliffDuration) {
         return 0;
@@ -337,8 +336,9 @@ contract SpunkySDXTokenVesting is Ownable,ReentrancyGuard{
     }
 
     // If the current time is during the vesting period, calculate the proportion of tokens that can be released
-    uint256 vestingTimeElapsed = block.timestamp - vesting.startTime;
-    uint256 proportion = vestingTimeElapsed / vesting.vestingDuration;
+    uint256 elapsedTime = block.timestamp - (vesting.startTime + vesting.cliffDuration);
+    uint256 vestingTime = vesting.vestingDuration - vesting.cliffDuration;
+    uint256 proportion = elapsedTime / vestingTime;
 
     return vesting.amount * proportion;
    }
@@ -358,7 +358,7 @@ contract SpunkySDXTokenVesting is Ownable,ReentrancyGuard{
     function withdraw() external onlyOwner {
 
        uint256 amount = address(this).balance;
-       Address.sendValue(payable(msg.sender), msg.value);
+       Address.sendValue(payable(msg.sender), amount);
        emit Withdraw(amount);
   }
 
