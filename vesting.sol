@@ -261,7 +261,7 @@ contract SpunkySDXTokenVesting is Ownable,ReentrancyGuard{
         uint256 amount,
         uint256 cliffDuration,
         uint256 vestingDuration
-    ) public {
+    ) public nonReentrant {
          require(spunkyToken.balanceOf(msg.sender) >= amount, "Owner does not have enough balance");
     spunkyToken.safeTransferFrom(msg.sender, address(this), amount);
         // i removed the nonReentrant onthis function since it internal
@@ -300,7 +300,6 @@ contract SpunkySDXTokenVesting is Ownable,ReentrancyGuard{
         for (uint256 i = 0; i < vestingDetails.length; i++) {
             VestingDetail storage vesting = vestingDetails[i];
             if (
-                vesting.amount > 0 &&
                 vesting.amount > vesting.releasedAmount &&
                 block.timestamp >= vesting.startTime + vesting.cliffDuration
             ) {
@@ -332,7 +331,7 @@ contract SpunkySDXTokenVesting is Ownable,ReentrancyGuard{
 
     // If the current time is after the end of the vesting period, all tokens can be released
     if (block.timestamp >= vesting.startTime + vesting.vestingDuration) {
-        return vesting.amount;
+        return vesting.amount - vesting.releasedAmount;
     }
 
     // If the current time is during the vesting period, calculate the proportion of tokens that can be released
@@ -340,7 +339,7 @@ contract SpunkySDXTokenVesting is Ownable,ReentrancyGuard{
     uint256 vestingTime = vesting.vestingDuration - vesting.cliffDuration;
     uint256 proportion = elapsedTime / vestingTime;
 
-    return vesting.amount * proportion;
+    return (vesting.amount * proportion) - vesting.releasedAmount;
    }
 
     function getNumberOfVestingSchedules(
