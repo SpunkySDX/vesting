@@ -513,7 +513,7 @@ contract SpunkySDXTokenVesting is Ownable,ReentrancyGuard{
         uint256 amount,
         uint256 cliffDuration,
         uint256 vestingDuration
-    ) public nonReentrant {
+    ) public {
          require(spunkyToken.balanceOf(msg.sender) >= amount, "Owner does not have enough balance");
     spunkyToken.safeTransferFrom(msg.sender, address(this), amount);
         // i removed the nonReentrant onthis function since it internal
@@ -565,12 +565,8 @@ contract SpunkySDXTokenVesting is Ownable,ReentrancyGuard{
       uint256 unreleased = releasableAmount(vesting);
 
       if (unreleased > 0) {
-        vesting.releasedAmount += unreleased;
-        require(
-            IERC20(spunkyToken).safeTransfer(account, unreleased),
-            "Token transfer failed"
-        );
-
+      
+            IERC20(spunkyToken).safeTransfer(account, unreleased);
         emit TokensReleased(account, unreleased);
       }
     }
@@ -623,7 +619,7 @@ contract SpunkySDXTokenVesting is Ownable,ReentrancyGuard{
             tokenAddress != address(spunkyToken),
             "Owner cannot withdraw SSDX tokens in contract"
         );
-        token.SafeTransfer(owner(), tokenAmount);
+        token.safeTransfer(owner(), tokenAmount);
         emit Withdraw(tokenAmount);
     }
 
