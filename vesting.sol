@@ -503,7 +503,7 @@ contract SpunkySDXTokenVesting is Ownable,ReentrancyGuard{
      uint256 amount,
     uint256 cliffDuration,
      uint256 vestingDuration
-    ) public onlyOwner nonReentrant{
+    ) public onlyOwner {
         require(spunkyToken.balanceOf(msg.sender) >= amount, "Owner does not have enough balance");
         addVestingSchedule(account, amount, cliffDuration, vestingDuration);
     }
@@ -513,7 +513,7 @@ contract SpunkySDXTokenVesting is Ownable,ReentrancyGuard{
         uint256 amount,
         uint256 cliffDuration,
         uint256 vestingDuration
-    ) public {
+    ) public nonReentrant {
          require(spunkyToken.balanceOf(msg.sender) >= amount, "Owner does not have enough balance");
     spunkyToken.safeTransferFrom(msg.sender, address(this), amount);
         // i removed the nonReentrant onthis function since it internal
@@ -565,10 +565,10 @@ contract SpunkySDXTokenVesting is Ownable,ReentrancyGuard{
       uint256 unreleased = releasableAmount(vesting);
 
       if (unreleased > 0) {
-      
-            IERC20(spunkyToken).safeTransfer(account, unreleased);
-        emit TokensReleased(account, unreleased);
-      }
+        vesting.releasedAmount += unreleased;
+       IERC20(spunkyToken).safeTransfer(account, unreleased);
+       emit TokensReleased(account, unreleased);
+     }
     }
 
    function releasableAmount(VestingDetail storage vesting) private view returns (uint256) {
