@@ -499,51 +499,38 @@ contract SpunkySDXTokenVesting is Ownable,ReentrancyGuard{
     }
 
     function addVestByOwner(
-     address account,
-     uint256 amount,
+    address account,
+    uint256 amount,
     uint256 cliffDuration,
-     uint256 vestingDuration
-    ) public onlyOwner {
-        require(spunkyToken.balanceOf(msg.sender) >= amount, "Owner does not have enough balance");
-        addVestingSchedule(account, amount, cliffDuration, vestingDuration);
-    }
-
-     function addVestingSchedule(
-        address account,
-        uint256 amount,
-        uint256 cliffDuration,
-        uint256 vestingDuration
-    ) public nonReentrant {
-         require(spunkyToken.balanceOf(msg.sender) >= amount, "Owner does not have enough balance");
+    uint256 vestingDuration
+) public onlyOwner nonReentrant {
+    require(spunkyToken.balanceOf(msg.sender) >= amount, "Owner does not have enough balance");
     spunkyToken.safeTransferFrom(msg.sender, address(this), amount);
-        // i removed the nonReentrant onthis function since it internal
-        require(account != address(0), "Invalid account");
-        require(amount > 0, "Invalid amount");
-        require(
-            cliffDuration < vestingDuration,
-            "Cliff duration must be less than vesting duration"
-        );
-        require(
-            spunkyToken.balanceOf(msg.sender) >= amount,
-            "Owner does not have enough balance"
-        );
-        VestingDetail memory newVesting = VestingDetail({
-            vestOwner: msg.sender,
-            amount: amount,
-            startTime: block.timestamp,
-            cliffDuration: cliffDuration,
-            vestingDuration: vestingDuration,
-            releasedAmount: 0
-        });
-        _vestingDetails[account].push(newVesting);
-        emit VestingScheduleAdded(
-            account,
-            amount,
-            block.timestamp,
-            cliffDuration,
-            vestingDuration
-        );
-    }
+    addVestingSchedule(account, amount, cliffDuration, vestingDuration);
+}
+
+function addVestingSchedule(
+    address account,
+    uint256 amount,
+    uint256 cliffDuration,
+    uint256 vestingDuration
+) internal {
+    require(account != address(0), "Invalid account");
+    require(amount > 0, "Invalid amount");
+    require(cliffDuration < vestingDuration, "Cliff duration must be less than vesting duration");
+
+    VestingDetail memory newVesting = VestingDetail({
+        vestOwner: msg.sender,
+        amount: amount,
+        startTime: block.timestamp,
+        cliffDuration: cliffDuration,
+        vestingDuration: vestingDuration,
+        releasedAmount: 0
+    });
+    _vestingDetails[account].push(newVesting);
+    emit VestingScheduleAdded(account, amount, block.timestamp, cliffDuration, vestingDuration);
+}
+
 
      // Function to release vested tokens
     function releaseVestedTokens(address account) public nonReentrant {
