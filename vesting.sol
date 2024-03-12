@@ -509,38 +509,47 @@ contract SpunkySDXTokenVesting is Ownable,ReentrancyGuard{
     }
 
      function addVestingSchedule(
-        address account,
-        uint256 amount,
-        uint256 cliffDuration,
-        uint256 vestingDuration
-    ) public nonReentrant {
-         require(spunkyToken.balanceOf(msg.sender) >= amount, "Owner does not have enough balance");
+    address account,
+    uint256 amount,
+    uint256 cliffDuration,
+    uint256 vestingDuration
+ ) public nonReentrant {
+    require(account != address(0), "Invalid account");
+    require(amount > 0, "Invalid amount");
+    require(cliffDuration < vestingDuration, "Cliff duration must be less than vesting duration");
+
+    // Capture the contract's token balance before the token transfer.
+    uint256 balanceBefore = spunkyToken.balanceOf(address(this));
+
+    // Transfer the tokens from the sender to the contract.
     spunkyToken.safeTransferFrom(msg.sender, address(this), amount);
-        // i removed the nonReentrant onthis function since it internal
-        require(account != address(0), "Invalid account");
-        require(amount > 0, "Invalid amount");
-        require(
-            cliffDuration < vestingDuration,
-            "Cliff duration must be less than vesting duration"
-        );
-       
-        VestingDetail memory newVesting = VestingDetail({
-            vestOwner: msg.sender,
-            amount: amount,
-            startTime: block.timestamp,
-            cliffDuration: cliffDuration,
-            vestingDuration: vestingDuration,
-            releasedAmount: 0
-        });
-        _vestingDetails[account].push(newVesting);
-        emit VestingScheduleAdded(
-            account,
-            amount,
-            block.timestamp,
-            cliffDuration,
-            vestingDuration
-        );
-    }
+
+    // Capture the contract's token balance after the token transfer.
+    uint256 balanceAfter = spunkyToken.balanceOf(address(this));
+
+    // Calculate the actual amount received.
+    uint256 actualAmount = balanceAfter - balanceBefore;
+
+    // Use the actual amount for the vesting calculations and assignments.
+    VestingDetail memory newVesting = VestingDetail({
+        vestOwner: account,
+        amount: actualAmount, // Use actualAmount here
+        startTime: block.timestamp,
+        cliffDuration: cliffDuration,
+        vestingDuration: vestingDuration,
+        releasedAmount: 0
+    });
+
+    _vestingDetails[account].push(newVesting);
+
+    emit VestingScheduleAdded(
+        account,
+        actualAmount, // Emit actualAmount
+        block.timestamp,
+        cliffDuration,
+        vestingDuration
+    );
+  }
 
      // Function to release vested tokens
     function releaseVestedTokens(address account) public nonReentrant {
