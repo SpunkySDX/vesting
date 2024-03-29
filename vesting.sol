@@ -502,21 +502,44 @@ contract SpunkySDXTokenVesting is Ownable,ReentrancyGuard{
     function addVestByOwner(
      address account,
      uint256 amount,
-    uint256 cliffDuration,
+     uint256 cliffDuration,
      uint256 vestingDuration
     ) public onlyOwner {
-        addVestingSchedule(account, amount, cliffDuration, vestingDuration);
+        addVestingSchedule(account, amount, cliffDuration, vestingDuration, false);
     }
 
-     function addVestingSchedule(
+    function addVestingSchedule(
     address account,
     uint256 amount,
     uint256 cliffDuration,
-    uint256 vestingDuration
- ) public nonReentrant {
+    uint256 vestingDuration,
+    bool presale 
+   ) public nonReentrant {
     require(account != address(0), "Invalid account");
     require(amount > 0, "Invalid amount");
     require(cliffDuration < vestingDuration, "Cliff duration must be less than vesting duration");
+
+    if(presale == true){
+       // Use the actual amount for the vesting calculations and assignments.
+    VestingDetail memory newVesting = VestingDetail({
+        vestOwner: account,
+        amount: amount, // Use actualAmount here
+        startTime: block.timestamp,
+        cliffDuration: cliffDuration,
+        vestingDuration: vestingDuration,
+        releasedAmount: 0
+    });
+
+    _vestingDetails[account].push(newVesting);
+
+    emit VestingScheduleAdded(
+        account,
+        amount, // Emit actualAmount
+        block.timestamp,
+        cliffDuration,
+        vestingDuration
+    );
+    }else{
 
     // Capture the contract's token balance before the token transfer.
     uint256 balanceBefore = spunkyToken.balanceOf(address(this));
@@ -549,6 +572,7 @@ contract SpunkySDXTokenVesting is Ownable,ReentrancyGuard{
         cliffDuration,
         vestingDuration
     );
+    }
   }
 
      // Function to release vested tokens
